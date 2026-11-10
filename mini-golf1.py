@@ -5,7 +5,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 import hello_helpers.hello_misc as hm
 
-CUBE_X, CUBE_Y = 1.5, 0.0     # must match the cube's pos in your scene XML
+GOAL_DISTANCE = 1.5   # must match the cube's pos in your scene XML
 STOP_DISTANCE = 0.6           # stop this far from the cube (meters)
 
 class MiniGolf(hm.HelloNode):
@@ -18,14 +18,20 @@ class MiniGolf(hm.HelloNode):
 
         self.stow_the_robot()
         self.switch_to_navigation_mode()
-        self.drive_to(CUBE_X, CUBE_Y, STOP_DISTANCE)
 
+        # Set the goal relative to where the robot is right now
+        (x0, y0, a0), _ = self.get_robot_floor_pose_xya()
+        goal_x = x0 + GOAL_DISTANCE * math.cos(a0)
+        goal_y = y0 + GOAL_DISTANCE * math.sin(a0)
+        self.get_logger().info(f'Start at ({x0:.2f}, {y0:.2f}), goal at ({goal_x:.2f}, {goal_y:.2f})')
+
+        self.drive_to(goal_x, goal_y, STOP_DISTANCE)
         self.backswing()
 
         (x, y, a), _ = self.get_robot_floor_pose_xya()
         self.get_logger().info(f'Done. Now at ({x:.2f}, {y:.2f}), angle {a:.2f}')
         rclpy.shutdown()
-
+        
     def drive_to(self, gx, gy, stop_dist, timeout=60.0):
         """Turn toward (gx, gy) and drive until within stop_dist."""
         start = time.time()
