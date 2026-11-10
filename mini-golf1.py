@@ -86,10 +86,10 @@ class MiniGolf(hm.HelloNode):
 
         # Backswing: gripper pointing back, raised to horizontal
         self.move({'joint_wrist_yaw': -1.57}, wait=4.0)
-        self.move({'joint_wrist_pitch': 0.0}, wait=4.0)
+        self.move({'joint_wrist_pitch': -0.5}, wait=4.0)
 
         # Downswing: swing down to vertical (this is where the ball gets hit)
-        self.move({'joint_wrist_pitch': -1.5}, wait=4.0)
+        self.move({'joint_wrist_pitch': -2}, wait=4.0)
 
     def move(self, pose, wait=2.0):
         self.get_logger().info(f'Moving: {pose}')
