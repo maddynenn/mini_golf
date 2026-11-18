@@ -35,6 +35,12 @@ FLOOR_FRAME = 'odom'        # 'odom' in sim (no map); switch to 'map' with local
 COLOR_TOPIC = '/camera/color/image_raw'
 DEPTH_TOPIC = '/camera/depth/image_rect_raw'
 DEPTH_INFO_TOPIC = '/camera/depth/camera_info'
+# On the real robot the depth and colour sensors are offset with different
+# fields of view, so a colour pixel doesn't line up with the raw depth image.
+# realsense publishes depth re-projected onto the colour image; when that topic
+# exists we use it (with the colour intrinsics) instead.
+ALIGNED_DEPTH_TOPIC = '/camera/aligned_depth_to_color/image_raw'
+ALIGNED_DEPTH_INFO_TOPIC = '/camera/color/camera_info'
 
 # --- Head pose used to look at the floor ahead of the robot ---
 HEAD_TILT = -0.8            # rad, look down (CLAUDE.md)
@@ -63,13 +69,23 @@ def setup(node):
     node.latest_depth = None
     node.depth_info = None
 
+    depth_topic, info_topic = DEPTH_TOPIC, DEPTH_INFO_TOPIC
+    topics = [name for name, _ in node.get_topic_names_and_types()]
+    if ALIGNED_DEPTH_TOPIC in topics:
+        depth_topic, info_topic = ALIGNED_DEPTH_TOPIC, ALIGNED_DEPTH_INFO_TOPIC
+    if COLOR_TOPIC not in topics:
+        node.get_logger().error(
+            f'detection: {COLOR_TOPIC} is not published. On the real robot start the '
+            'camera: ros2 launch stretch_core d435i_low_resolution.launch.py')
+    node.get_logger().info(f'detection: depth from {depth_topic}')
+
     # The sim (and real) camera topics publish BEST_EFFORT, so subscribe with
     # sensor-data QoS or the callbacks never fire (QoS-incompatible otherwise).
     node.create_subscription(Image, COLOR_TOPIC,
                              lambda m: _set(node, 'latest_color', m), qos_profile_sensor_data)
-    node.create_subscription(Image, DEPTH_TOPIC,
+    node.create_subscription(Image, depth_topic,
                              lambda m: _set(node, 'latest_depth', m), qos_profile_sensor_data)
-    node.create_subscription(CameraInfo, DEPTH_INFO_TOPIC,
+    node.create_subscription(CameraInfo, info_topic,
                              lambda m: _set(node, 'depth_info', m), qos_profile_sensor_data)
 
     # Head move_to_pose is only honored in position mode (the sim often starts in
@@ -140,7 +156,8 @@ def _wait_for_frames(node, timeout):
             return
         time.sleep(0.1)
     node.get_logger().warn('detection: timed out waiting for camera frames '
-                           '(is the sim launched with use_cameras:=true?)')
+                           '(real robot: is d435i_low_resolution.launch.py running? '
+                           'sim: launched with use_cameras:=true?)')
 
 
 def _find_ball_blob(node, bgr):

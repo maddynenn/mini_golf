@@ -4,7 +4,14 @@
 
 ### Start the robot with it broadcasting its location
 
-ros2 launch stretch_core stretch_driver.launch.py broadcast_odom_tf:=True use_cameras:=true
+ros2 launch stretch_core stretch_driver.launch.py broadcast_odom_tf:=True
+
+### Start the head camera (second terminal; needed for detection)
+
+ros2 launch stretch_core d435i_low_resolution.launch.py
+
+Check it's up with `ros2 topic list | grep camera`. (`use_cameras:=true` is a
+sim-only argument; the real driver ignores it.)
 
 ### Make the helper modules available
 

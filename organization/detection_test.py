@@ -54,8 +54,9 @@ class DetectionTest(hm.HelloNode):
             cv2.imwrite(os.path.join(OUT_DIR, 'debug_mask.png'), mask)
             self.get_logger().info(f'Saved debug_color.png and debug_mask.png to {OUT_DIR}')
         else:
-            self.get_logger().error('No color frame received. '
-                                    'Is the sim launched with use_cameras:=true?')
+            self.get_logger().error('No color frame received. Real robot: run '
+                                    'ros2 launch stretch_core d435i_low_resolution.launch.py. '
+                                    'Sim: launch with use_cameras:=true.')
 
         # Run detection a few times (the ball/robot are still, so it should be steady).
         for i in range(5):
