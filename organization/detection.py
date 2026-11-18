@@ -6,9 +6,10 @@ Uses the head D435i camera (same topic names in sim and on the real robot):
     depth:      /camera/depth/image_rect_raw   (32FC1 metres in sim, 16UC1 mm real)
     depth info: /camera/depth/camera_info      (intrinsics for deprojection)
 
-find_ball() isolates the *white* ball by brightness + shape (not colour), gets
-its pixel, reads the depth there, deprojects to a 3D point in the camera frame,
-and transforms it into FLOOR_FRAME -- the same frame get_robot_floor_pose_xya()
+find_ball() isolates the *yellow* ball by colour (HSV) + shape, gets its pixel,
+reads the depth there, deprojects to a 3D point in the camera frame (pushed back
+by one ball radius so it is the ball's centre, not its front surface), and
+transforms it into FLOOR_FRAME -- the same frame get_robot_floor_pose_xya()
 returns -- so moving.py can drive to it.
 
 The hole is NOT detected: its location is predetermined from the map (CLAUDE.md),
@@ -39,11 +40,13 @@ DEPTH_INFO_TOPIC = '/camera/depth/camera_info'
 HEAD_TILT = -0.8            # rad, look down (CLAUDE.md)
 HEAD_PAN = 0.0             # rad, look forward (+x)
 
-# --- White-ball thresholds (HSV: low saturation, high value = white) ---
-WHITE_S_MAX = 60           # max saturation (0-255); white is near-grey
-WHITE_V_MIN = 180          # min brightness (0-255); the ball is the bright thing
-MIN_BALL_AREA = 30         # px^2, ignore specks
-MAX_BALL_AREA = 60000      # px^2, ignore huge bright regions (walls, glare)
+# --- Yellow-ball thresholds (HSV; OpenCV hue is 0-179, so yellow ~ 20-35) ---
+YELLOW_LOWER = (20, 80, 80)    # (H, S, V) lower bound
+YELLOW_UPPER = (40, 255, 255)  # (H, S, V) upper bound
+BALL_RADIUS = 0.04445      # m, 3.5 in diameter ball (depth sees the front face;
+                           # we add this along the camera ray to get the centre)
+MIN_BALL_AREA = 50         # px^2, ignore specks
+MAX_BALL_AREA = 150000     # px^2, ignore huge regions (a 3.5 in ball up close is big)
 MIN_CIRCULARITY = 0.6      # 4*pi*area / perimeter^2 (1.0 = perfect circle)
 DEPTH_PATCH = 5            # NxN patch for a robust (median) depth reading
 
@@ -69,6 +72,11 @@ def setup(node):
     node.create_subscription(CameraInfo, DEPTH_INFO_TOPIC,
                              lambda m: _set(node, 'depth_info', m), qos_profile_sensor_data)
 
+    # Head move_to_pose is only honored in position mode (the sim often starts in
+    # navigation mode), so switch first or the head won't actually tilt down.
+    node.switch_to_position_mode()
+    time.sleep(1.0)
+
     # Point the head down-and-forward so the ball is in view, then let frames arrive.
     node.move_to_pose({'joint_head_pan': HEAD_PAN, 'joint_head_tilt': HEAD_TILT}, blocking=True)
     time.sleep(2.0)
@@ -77,7 +85,7 @@ def setup(node):
 
 
 def find_ball(node):
-    """Return the white ball's (x, y) in FLOOR_FRAME, or None if not seen."""
+    """Return the yellow ball's (x, y) in FLOOR_FRAME, or None if not seen."""
     color_msg = node.latest_color
     depth_msg = node.latest_depth
     info = node.depth_info
@@ -88,7 +96,7 @@ def find_ball(node):
     bgr = _bridge.imgmsg_to_cv2(color_msg, desired_encoding='bgr8')
     depth = _bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
 
-    uv = _find_white_circle(node, bgr)
+    uv = _find_ball_blob(node, bgr)
     if uv is None:
         return None
     u, v = uv
@@ -103,6 +111,7 @@ def find_ball(node):
         return None
 
     point_cam = _deproject(info, du, dv, z)
+    point_cam = _surface_to_center(point_cam, BALL_RADIUS)   # front face -> ball centre
     point_floor = _to_floor_frame(node, point_cam, depth_msg.header.frame_id)
     if point_floor is None:
         return None
@@ -134,10 +143,10 @@ def _wait_for_frames(node, timeout):
                            '(is the sim launched with use_cameras:=true?)')
 
 
-def _find_white_circle(node, bgr):
-    """Biggest sufficiently-circular white blob -> (u, v) pixel, or None."""
+def _find_ball_blob(node, bgr):
+    """Biggest sufficiently-circular yellow blob -> (u, v) pixel, or None."""
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (0, 0, WHITE_V_MIN), (179, WHITE_S_MAX, 255))
+    mask = cv2.inRange(hsv, YELLOW_LOWER, YELLOW_UPPER)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
 
@@ -158,7 +167,7 @@ def _find_white_circle(node, bgr):
             best_area, best = area, c
 
     if best is None:
-        node.get_logger().warn('find_ball: no white circular blob found')
+        node.get_logger().warn('find_ball: no yellow circular blob found')
         return None
 
     m = cv2.moments(best)
@@ -194,6 +203,17 @@ def _deproject(info, u, v, z):
     x = (u - cx) * z / fx
     y = (v - cy) * z / fy
     return (x, y, z)
+
+
+def _surface_to_center(point_cam, radius):
+    """Push a point on the ball's near surface back to its centre, along the
+    camera ray (camera is at the optical-frame origin)."""
+    x, y, z = point_cam
+    d = (x * x + y * y + z * z) ** 0.5
+    if d == 0:
+        return point_cam
+    s = (d + radius) / d
+    return (x * s, y * s, z * s)
 
 
 def _to_floor_frame(node, point_cam, camera_frame):

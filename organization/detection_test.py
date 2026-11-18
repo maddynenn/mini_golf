@@ -15,10 +15,11 @@ If the GUI image viewers are flaky in WSL, just open the saved PNGs from Windows
     \\wsl.localhost\Ubuntu-22.04\home\confi\mini_golf\organization\debug_mask.png
 
 What good output looks like:
-    - debug_color.png shows the white ball somewhere in the frame.
+    - debug_color.png shows the yellow ball somewhere in the frame.
     - debug_mask.png shows the ball as a white blob on a black background
-      (if the mask is mostly white, lower WHITE_V_MIN / WHITE_S_MAX in detection.py;
-       if the ball is black/missing, loosen them).
+      (the mask is the yellow threshold; if the ball is missing/partial, widen
+       YELLOW_LOWER / YELLOW_UPPER in detection.py; if other stuff shows up,
+       tighten them).
     - find_ball -> (~0.8, ~0.0), matching the ball's spot in scene.xml.
 """
 import os
@@ -48,8 +49,7 @@ class DetectionTest(hm.HelloNode):
         if self.latest_color is not None:
             bgr = _bridge.imgmsg_to_cv2(self.latest_color, desired_encoding='bgr8')
             hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-            mask = cv2.inRange(hsv, (0, 0, detection.WHITE_V_MIN),
-                               (179, detection.WHITE_S_MAX, 255))
+            mask = cv2.inRange(hsv, detection.YELLOW_LOWER, detection.YELLOW_UPPER)
             cv2.imwrite(os.path.join(OUT_DIR, 'debug_color.png'), bgr)
             cv2.imwrite(os.path.join(OUT_DIR, 'debug_mask.png'), mask)
             self.get_logger().info(f'Saved debug_color.png and debug_mask.png to {OUT_DIR}')
