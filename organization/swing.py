@@ -5,9 +5,12 @@ Pulled out of backswing() in mini-golf1.py and split into stages so each one
 can be tuned on its own:
 
     get_ready()       raise the lift and extend the arm so the wrist has room
-    backswing()       point the gripper back and raise it
-    downswing()       swing down through the ball (this is the hit)
+    backswing()       rotate the gripper back to one side (wrist yaw)
+    downswing()       swing side to side through the ball (this is the hit)
     follow_through()  bring the wrist back to a safe pose
+
+The swing only uses joint_wrist_yaw (side to side). Wrist pitch (up/down) is
+not moved.
 
 The functions take the node as their first argument so main.py (or any other
 HelloNode) can call them. Run this file on its own to test just the swing,
@@ -20,11 +23,12 @@ import time
 import hello_helpers.hello_misc as hm
 
 # --- Tunables (start from the values in mini-golf1.py) ---
-LIFT_HEIGHT = 0.6           # m, joint_lift
+HOME_LIFT = 0.6             # m, joint_lift home height (from mini-golf1.py)
+INCH = 0.0254               # m
+LIFT_HEIGHT = HOME_LIFT - 2 * INCH  # m, 2 in below home = 0.5492
 ARM_EXTENSION = 0.2         # m, wrist_extension
-BACKSWING_YAW = -1.57       # rad, joint_wrist_yaw (gripper pointing back)
-BACKSWING_PITCH = -0.5      # rad, joint_wrist_pitch at the top of the backswing
-IMPACT_PITCH = -2.0         # rad, joint_wrist_pitch at the bottom of the downswing
+BACKSWING_YAW = -1.57       # rad, joint_wrist_yaw at the top of the backswing
+IMPACT_YAW = 1.0            # rad, joint_wrist_yaw at the end of the swing (past center = follow-through)
 DOWNSWING_DURATION = 0.5    # s, shorter = harder hit (if your hello_helpers supports it)
 SETTLE_TIME = 1.0           # s, pause between stages so the arm stops shaking
 
@@ -73,19 +77,16 @@ def get_ready(node):
 
 def backswing(node):
     move(node, {'joint_wrist_yaw': BACKSWING_YAW})
-    move(node, {'joint_wrist_pitch': BACKSWING_PITCH})
 
 
 def downswing(node):
     # TODO: this is the part that needs work. The original used a plain
     # blocking move with the default speed, which is too slow to hit well.
-    move(node, {'joint_wrist_pitch': IMPACT_PITCH}, duration=DOWNSWING_DURATION)
+    move(node, {'joint_wrist_yaw': IMPACT_YAW}, duration=DOWNSWING_DURATION)
 
 
 def follow_through(node):
-    # Bring the wrist back up and centered before anything else moves,
-    # so the gripper doesn't drag on the floor or hit the basket.
-    move(node, {'joint_wrist_pitch': 0.0})
+    # Center the wrist before anything else moves.
     move(node, {'joint_wrist_yaw': 0.0})
     # TODO: stow the robot here if moving.py needs the arm out of the way
 
