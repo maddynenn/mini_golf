@@ -10,3 +10,13 @@ source ~/ament_ws/install/setup.bash
 
 ### Start the script
 python3 ~/mini_golf/mini-golf1.py
+
+## Organized version (organization/)
+
+Same first two steps as above (start the driver, then source), then:
+
+### Run the full shot (detection -> moving -> swing)
+python3 ~/mini_golf/organization/main.py
+
+### Test only the swing (robot already parked next to the ball)
+python3 ~/mini_golf/organization/swing.py
