@@ -39,6 +39,9 @@ import final_approach
 POS_REQ = 0.05                 # m, required accuracy (relative to AMCL's estimate)
 YAW_REQ = math.radians(3)      # rad
 MAX_ATTEMPTS = 3               # final approach passes
+# False = stop after Nav2 (within its 0.15 m / 0.25 rad goal tolerance) and skip
+# final_approach.py. Disabled for now: on the robot it drove away from the goal.
+USE_FINAL_APPROACH = False
 NAV2_TIMEOUT = 300.0           # s
 APPROACH_TIMEOUT = 60.0        # s, per final approach pass
 BLOCKED_TIMEOUT = 10.0         # s, give up if the way stays blocked this long
@@ -72,6 +75,15 @@ def go_to(node, x, y, yaw):
     try:
         if not nav2_go_to(node, goal):
             return False
+        if not USE_FINAL_APPROACH:
+            stop(node)
+            pose = map_pose(node)
+            if pose is not None:
+                dist = math.hypot(x - pose[0], y - pose[1])
+                yaw_err = abs(final_approach.wrap(yaw - pose[2]))
+                log.info(f'Nav2 done (final approach disabled): {dist * 100:.1f} cm, '
+                         f'{math.degrees(yaw_err):.1f} deg from goal')
+            return True
         for attempt in range(1, MAX_ATTEMPTS + 1):
             if not final_approach_pass(node, goal):
                 return False

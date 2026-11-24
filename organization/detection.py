@@ -37,7 +37,10 @@ import tf2_geometry_msgs  # registers do_transform for PointStamped
 from tf2_geometry_msgs import do_transform_point
 
 # --- Frames / topics ---
-FLOOR_FRAME = 'odom'        # 'odom' in sim (no map); switch to 'map' with localization
+# The ball is reported in the map frame, the same frame Nav2 goals use
+# (navigation/go_to_goal.py), so its (x, y) can be sent straight to go_to().
+# Needs the navigation launch running (AMCL publishes map -> odom).
+FLOOR_FRAME = 'map'
 COLOR_TOPIC = '/camera/color/image_raw'
 DEPTH_TOPIC = '/camera/depth/image_rect_raw'
 DEPTH_INFO_TOPIC = '/camera/depth/camera_info'
@@ -56,8 +59,11 @@ HEAD_PAN = 0.0             # rad, look forward (+x)
 # White = low saturation, high brightness; hue is meaningless so it spans 0-179.
 # The shadowed underside of the ball is greyer, so V isn't set too high; the
 # size and floor-height checks in find_ball reject other white things.
-WHITE_LOWER = (0, 0, 160)      # (H, S, V) lower bound -- lower V if the ball looks grey
-WHITE_UPPER = (179, 60, 255)   # (H, S, V) upper bound -- raise S if the ball looks tinted
+# Measured on the real robot: the ball is S <= ~8, V ~210-255; chairs, floor
+# glare and other clutter sit at S 20-60, V 160-200. (Was V >= 160, S <= 60,
+# which let a lot of that clutter through.)
+WHITE_LOWER = (0, 0, 200)      # (H, S, V) lower bound -- lower V if the ball looks grey
+WHITE_UPPER = (179, 30, 255)   # (H, S, V) upper bound -- raise S if the ball looks tinted
 BALL_RADIUS = 0.021335     # m, standard golf ball: 1.68 in / 42.67 mm diameter
                            # (depth sees the front face; we add this along the
                            # camera ray to get the centre)
@@ -78,9 +84,11 @@ MIN_BALL_HEIGHT = -0.08    # m
 MAX_BALL_HEIGHT = 0.12     # m
 DEPTH_PATCH = 5            # NxN patch for a robust (median) depth reading
 
-# --- Predetermined hole location in FLOOR_FRAME (read from the map in RViz) ---
-# Matches the sim goal_cube at (1.5, 0). Set the real value on the robot.
-HOLE = (1.5, 0.0)
+# --- Hole: one fixed spot in FLOOR_FRAME (map, m) ---
+# Placeholder in the open area of the WVH map near where the robot has been
+# tested. Set it to where the real hole is: in RViz use "Publish Point" on it and
+# read `ros2 topic echo /clicked_point --once`.
+HOLE = (25.0, 14.0)
 
 _bridge = CvBridge()
 

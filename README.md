@@ -29,6 +29,16 @@ Same first two steps as above (start the driver, then source), then:
 
 python3 ~/mini_golf/organization/main.py
 
+### Test only the startup (home, stow, claw open/close, arm up)
+
+python3 ~/mini_golf/organization/startup.py
+
+### Test only detection + lining up behind the ball (no startup, no swing)
+
+python3 ~/mini_golf/organization/line_up.py
+
+Add `--ball X Y` (map frame) to skip detection.
+
 ### Test only the swing (robot already parked next to the ball)
 
 python3 ~/mini_golf/organization/swing.py

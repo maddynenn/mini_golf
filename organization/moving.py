@@ -9,38 +9,81 @@ still needs writing. Nav2 (see the parcs_stretch_nav2_WVH starter code) is
 another option for longer moves.
 """
 import math
+import os
+import sys
 import time
 
 from geometry_msgs.msg import Twist
 import hello_helpers.hello_misc as hm
+
+sys.path.insert(0, os.path.expanduser('~/mini_golf/navigation'))
+import go_to_goal   # Nav2 goals in the map frame (same frame as detection.FLOOR_FRAME)
 
 STOP_DISTANCE = 0.6     # m, how far from the ball to stop (tune with the arm's reach)
 
 
 def setup(node):
     node.cmd_vel = node.create_publisher(Twist, '/stretch/cmd_vel', 10)
+    go_to_goal.setup(node)
+
+
+def robot_map_pose(node):
+    """Robot (x, y, yaw) in the map frame, or None if localization isn't running."""
+    return go_to_goal.map_pose(node)
+
+
+def go_to_ball(node, ball_xy, stop_dist=STOP_DISTANCE):
+    """Nav2 to stop_dist short of the ball, facing it. ball_xy is in the map frame.
+
+    Returns True if Nav2 reached the goal.
+    """
+    log = node.get_logger()
+    pose = robot_map_pose(node)
+    if pose is None:
+        log.error('go_to_ball: no robot pose in the map frame (is the navigation launch running?)')
+        return False
+    bx, by = ball_xy
+    dx, dy = bx - pose[0], by - pose[1]
+    dist = math.hypot(dx, dy)
+    yaw = math.atan2(dy, dx)                 # face the ball
+    if dist <= stop_dist:
+        gx, gy = pose[0], pose[1]            # already close enough: just turn to face it
+    else:
+        gx, gy = bx - stop_dist * dx / dist, by - stop_dist * dy / dist
+    log.info(f'go_to_ball: ball at ({bx:.2f}, {by:.2f}), going to ({gx:.2f}, {gy:.2f}, '
+             f'{yaw:.2f}) in map')
+    return go_to_goal.go_to(node, gx, gy, yaw)
+
+
+SHOT_DISTANCE = 0.5     # m, how far behind the ball (on the hole -> ball line) the robot stops
+
+
+def shot_pose(ball_xy, hole_xy, dist=SHOT_DISTANCE):
+    """(x, y, yaw) dist behind the ball on the line through the hole and the ball,
+    on the side away from the hole, facing the hole. All in the map frame."""
+    dx, dy = hole_xy[0] - ball_xy[0], hole_xy[1] - ball_xy[1]
+    d = math.hypot(dx, dy)
+    if d < 1e-6:
+        raise ValueError('ball is on the hole')
+    ux, uy = dx / d, dy / d                  # unit vector ball -> hole
+    return (ball_xy[0] - dist * ux, ball_xy[1] - dist * uy, math.atan2(uy, ux))
 
 
 def line_up_with_ball(node, ball_xy, hole_xy=None):
-    """Drive so the robot is next to the ball and the swing sends it toward the hole.
+    """Drive to the far side of the ball from the hole, facing the hole, so the
+    swing sends the ball toward the hole. ball_xy, hole_xy: map frame.
 
-    Pseudocode:
-        if hole_xy is None:
-            # No hole yet: just drive toward the ball like mini-golf1.py did
-            drive_to(node, ball_xy, STOP_DISTANCE)
-            return
-
-        direction = unit vector from ball to hole
-        # The swing hits sideways/behind the robot, so work out where the base
-        # has to be for the gripper to sit behind the ball on that line:
-        target_xy = ball_xy - direction * (offset from base to gripper)
-        target_heading = heading that points the swing along direction
-        drive_to(node, target_xy, stop_dist=0.02)
-        turn_to(node, target_heading)
-        stop_base(node)
+    Returns True if Nav2 reached the pose. Without a hole, falls back to driving
+    up to the ball (go_to_ball).
     """
-    node.switch_to_navigation_mode()
-    drive_to(node, ball_xy, STOP_DISTANCE)
+    if hole_xy is None:
+        return go_to_ball(node, ball_xy, STOP_DISTANCE)
+    x, y, yaw = shot_pose(ball_xy, hole_xy)
+    node.get_logger().info(
+        f'line_up_with_ball: ball ({ball_xy[0]:.2f}, {ball_xy[1]:.2f}), hole '
+        f'({hole_xy[0]:.2f}, {hole_xy[1]:.2f}) -> going to ({x:.2f}, {y:.2f}, {yaw:.2f}) in map, '
+        f'{SHOT_DISTANCE:.2f} m behind the ball')
+    return go_to_goal.go_to(node, x, y, yaw)
 
 
 def turn_to(node, heading, timeout=20.0):

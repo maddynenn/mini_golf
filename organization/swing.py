@@ -4,7 +4,7 @@
 Pulled out of backswing() in mini-golf1.py and split into stages so each one
 can be tuned on its own:
 
-    get_ready()       raise the lift and extend the arm so the wrist has room
+    get_ready()       extend the arm, rotate the club out, then lower to swing height
     backswing()       rotate the gripper back to one side (wrist yaw)
     downswing()       swing side to side through the ball (this is the hit)
     follow_through()  bring the wrist back to a safe pose
@@ -28,6 +28,7 @@ INCH = 0.0254               # m
 LIFT_HEIGHT = HOME_LIFT - 2 * INCH  # m, 2 in below home = 0.5492
 ARM_EXTENSION = 0.2         # m, wrist_extension
 BACKSWING_YAW = -1.57       # rad, joint_wrist_yaw at the top of the backswing
+WRIST_YAW_OUT = 0.0         # rad, joint_wrist_yaw straight out from the arm (club clear of the robot)
 IMPACT_YAW = 1.0            # rad, joint_wrist_yaw at the end of the swing (past center = follow-through)
 DOWNSWING_DURATION = 0.5    # s, shorter = harder hit (if your hello_helpers supports it)
 SETTLE_TIME = 1.0           # s, pause between stages so the arm stops shaking
@@ -68,11 +69,23 @@ def move(node, pose, wait=SETTLE_TIME, duration=None):
     time.sleep(wait)
 
 
-def get_ready(node):
+def get_ready(node, extend_first=True):
+    """Lift to LIFT_HEIGHT and extend to ARM_EXTENSION.
+
+    extend_first=True (the swing): the arm comes in high from startup with the
+    club tucked inside, so go out first (extend the arm, rotate the club out),
+    then down. startup.py passes False: right after stow the lift is low, over
+    the basket, so it has to go up before the arm extends.
+    """
     node.switch_to_position_mode()
     time.sleep(SETTLE_TIME)  # let the base settle after driving
-    move(node, {'joint_lift': LIFT_HEIGHT})
-    move(node, {'wrist_extension': ARM_EXTENSION})
+    if extend_first:
+        move(node, {'wrist_extension': ARM_EXTENSION})
+        move(node, {'joint_wrist_yaw': WRIST_YAW_OUT})   # club out from inside the robot
+        move(node, {'joint_lift': LIFT_HEIGHT})
+    else:
+        move(node, {'joint_lift': LIFT_HEIGHT})
+        move(node, {'wrist_extension': ARM_EXTENSION})
 
 
 def backswing(node):
