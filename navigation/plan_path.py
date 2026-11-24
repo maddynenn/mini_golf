@@ -5,6 +5,12 @@ Needs plan_only.launch.py running (no robot or simulator).
 
     python3 ~/mini_golf/navigation/plan_path.py SX SY SYAW GX GY GYAW \
         [--obstacle X Y R]... [--png FILE]
+    python3 ~/mini_golf/navigation/plan_path.py --interactive [--obstacle X Y R]...
+
+--interactive (launch with use_rviz:=true): set the start with RViz's
+"2D Pose Estimate", the goal with "2D Goal Pose", and add/remove fake obstacles
+with "Publish Point" (click empty floor to add one, click an obstacle to remove
+it). The path is re-planned and drawn after every change; Ctrl-C to stop.
 
 Poses are in the map frame (m, m, rad). --obstacle adds a round obstacle that is
 NOT on the map (centre X, Y, radius R in m); it is reported by a fake lidar scan
@@ -35,10 +41,11 @@ import time
 import warnings
 
 import rclpy
-from geometry_msgs.msg import PoseStamped, TransformStamped
+from geometry_msgs.msg import (PointStamped, PoseStamped, PoseWithCovarianceStamped,
+                               TransformStamped)
 from nav2_msgs.action import ComputePathToPose
 from nav2_msgs.srv import ClearEntireCostmap
-from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import OccupancyGrid, Path
 from rclpy.action import ActionClient
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -46,6 +53,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from tf2_ros import StaticTransformBroadcaster
+from visualization_msgs.msg import Marker, MarkerArray
 
 NAV_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(NAV_DIR, 'planning_results')
@@ -56,6 +64,7 @@ ROBOT_RADIUS = 0.27                  # m, costmap robot_radius
 INSCRIBED, LETHAL = 99, 100          # costmap values (OccupancyGrid scale) = collision
 COSTMAP_UPDATE_PERIOD = 1.2          # s, a bit over the global costmap's 1 Hz update
 COSTMAP_TIMEOUT = 10.0               # s, max wait for added obstacles to appear
+CLICK_OBSTACLE_RADIUS = 0.2          # m, obstacles added by clicking in RViz
 
 
 class PlanTester(Node):
@@ -294,6 +303,111 @@ def save_png(result, filename, title=''):
     plt.close(fig)
 
 
+def yaw_from(q):
+    return math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+
+
+def marker(mid, kind, x, y, colour, scale, yaw=0.0, text=''):
+    m = Marker()
+    m.header.frame_id = 'map'
+    m.ns, m.id, m.type, m.action = 'plan_path', mid, kind, Marker.ADD
+    m.pose.position.x, m.pose.position.y = float(x), float(y)
+    m.pose.orientation.z, m.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+    m.scale.x, m.scale.y, m.scale.z = scale
+    m.color.r, m.color.g, m.color.b, m.color.a = colour
+    m.text = text
+    return m
+
+
+def publish_markers(pub, start, goal, obstacles, text=''):
+    """Start/goal (robot outline + heading arrow), obstacles and a result label."""
+    clear = Marker()
+    clear.action = Marker.DELETEALL
+    markers = [clear]
+    d = 2 * ROBOT_RADIUS
+    for i, (pose, colour) in enumerate(((start, (0.1, 0.8, 0.1, 1.0)),
+                                        (goal, (0.2, 0.4, 1.0, 1.0)))):
+        if pose is None:
+            continue
+        markers.append(marker(2 * i, Marker.CYLINDER, pose[0], pose[1], colour[:3] + (0.35,),
+                              (d, d, 0.02)))
+        markers.append(marker(2 * i + 1, Marker.ARROW, pose[0], pose[1], colour,
+                              (0.5, 0.08, 0.08), yaw=pose[2]))
+    for i, (cx, cy, r) in enumerate(obstacles):
+        markers.append(marker(10 + i, Marker.CYLINDER, cx, cy, (1.0, 0.0, 1.0, 0.8),
+                              (2 * r, 2 * r, 0.3)))
+    if text and goal is not None:
+        markers.append(marker(4, Marker.TEXT_VIEW_FACING, goal[0], goal[1] + 0.7,
+                              (0.05, 0.05, 0.05, 1.0), (0.0, 0.0, 0.5), text=text))
+    msg = MarkerArray()
+    msg.markers = markers
+    pub.publish(msg)
+
+
+def interactive(node, obstacles):
+    """Plan whenever the start, goal or obstacles are changed from RViz."""
+    latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+    path_pub = node.create_publisher(Path, '/plan_path/path', latched)
+    marker_pub = node.create_publisher(MarkerArray, '/plan_path/markers', latched)
+    state = {'start': None, 'goal': None, 'obstacles': list(obstacles)}
+    changed = threading.Event()
+
+    def on_start(msg):
+        p = msg.pose.pose
+        state['start'] = (p.position.x, p.position.y, yaw_from(p.orientation))
+        changed.set()
+
+    def on_goal(msg):
+        p = msg.pose
+        state['goal'] = (p.position.x, p.position.y, yaw_from(p.orientation))
+        changed.set()
+
+    def on_click(msg):
+        x, y = msg.point.x, msg.point.y
+        near = [o for o in state['obstacles'] if math.hypot(o[0] - x, o[1] - y) <= o[2]]
+        if near:
+            state['obstacles'] = [o for o in state['obstacles'] if o not in near]
+        else:
+            state['obstacles'] = state['obstacles'] + [(x, y, CLICK_OBSTACLE_RADIUS)]
+        changed.set()
+
+    node.create_subscription(PoseWithCovarianceStamped, '/initialpose', on_start, 10)
+    node.create_subscription(PoseStamped, '/goal_pose', on_goal, 10)
+    node.create_subscription(PointStamped, '/clicked_point', on_click, 10)
+    print('Interactive: in RViz use "2D Pose Estimate" to set the start, "2D Goal Pose" '
+          'for the goal, "Publish Point" to add/remove an obstacle. Ctrl-C to stop.')
+    publish_markers(marker_pub, None, None, state['obstacles'])
+
+    while rclpy.ok():
+        if not changed.wait(timeout=0.5):
+            continue
+        changed.clear()
+        start, goal, obs = state['start'], state['goal'], state['obstacles']
+        if start is None or goal is None:
+            publish_markers(marker_pub, start, goal, obs,
+                            'set the start' if start is None else 'set the goal')
+            continue
+        publish_markers(marker_pub, start, goal, obs, 'planning...')
+        result = plan(node, start, goal, obs)
+        print('\n' + summary(result), flush=True)
+        path = Path()
+        path.header.frame_id = 'map'
+        path.header.stamp = node.get_clock().now().to_msg()
+        path.poses = [pose_msg(node, (px, py, 0.0)) for px, py in result['path']]
+        path_pub.publish(path)  # empty path clears the old one if planning failed
+        if result['found']:
+            text = f"{result['length']:.2f} m"
+            if result['max_cost'] >= INSCRIBED:
+                text += ' (passes through collision zone)'
+            elif result['end_gap'] > 0.05:
+                text += f" (ends {result['end_gap']:.2f} m short)"
+        else:
+            text = 'NO PATH'
+        if not all(result['obstacles_seen']):
+            text += ' - obstacle not seen (>1.5 m from start?)'
+        publish_markers(marker_pub, start, goal, obs, text)
+
+
 def start_node():
     """Create the node and spin it in a background thread."""
     rclpy.init()
@@ -306,23 +420,31 @@ def start_node():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    for name in ('sx', 'sy', 'syaw', 'gx', 'gy', 'gyaw'):
-        parser.add_argument(name, type=float)
+    parser.add_argument('pose', type=float, nargs='*', metavar='SX SY SYAW GX GY GYAW',
+                        help='start and goal (map frame: m, m, rad)')
+    parser.add_argument('--interactive', action='store_true',
+                        help='set start/goal/obstacles from RViz (launch with use_rviz:=true)')
     parser.add_argument('--obstacle', nargs=3, type=float, action='append', default=[],
                         metavar=('X', 'Y', 'R'), help='extra round obstacle (repeatable)')
     parser.add_argument('--png', default=os.path.join(RESULTS_DIR, 'plan.png'))
     args = parser.parse_args()
+    if not args.interactive and len(args.pose) != 6:
+        parser.error('give SX SY SYAW GX GY GYAW, or --interactive')
+    obstacles = [tuple(o) for o in args.obstacle]
 
     node = start_node()
     try:
-        result = plan(node, (args.sx, args.sy, args.syaw), (args.gx, args.gy, args.gyaw),
-                      [tuple(o) for o in args.obstacle])
+        if args.interactive:
+            interactive(node, obstacles)
+            return
+        result = plan(node, tuple(args.pose[:3]), tuple(args.pose[3:]), obstacles)
         print(summary(result))
         save_png(result, args.png)
         print(f'picture: {os.path.abspath(args.png)}')
+    except KeyboardInterrupt:
+        pass
     finally:
-        rclpy.shutdown()
-
+        rclpy.try_shutdown()
 
 if __name__ == '__main__':
     main()

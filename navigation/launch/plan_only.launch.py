@@ -1,8 +1,10 @@
 """Nav2 path planning only, on the WVH map: no robot, no simulator, nothing moves.
 
-    ros2 launch ~/mini_golf/navigation/launch/plan_only.launch.py
+    ros2 launch ~/mini_golf/navigation/launch/plan_only.launch.py [use_rviz:=true]
 
-Then ask for paths with plan_path.py or run_planning_tests.py. Do not run this
+Then ask for paths with plan_path.py or run_planning_tests.py. With
+use_rviz:=true, RViz opens (config/plan_only.rviz) for
+plan_path.py --interactive: set the start and goal by clicking. Do not run this
 at the same time as mini_golf_nav.launch.py (both publish /map and TF).
 
 Starts the same map, keepout zones and planner (NavFn + global costmap) as
@@ -27,6 +29,7 @@ NAV_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WVH_MAP = os.path.join(NAV_DIR, 'maps', 'WVH_edit.yaml')
 KEEPOUT_MAP = os.path.join(NAV_DIR, 'maps', 'WVH_keepout.yaml')
 PARAMS = os.path.join(NAV_DIR, 'config', 'nav2_params.yaml')
+RVIZ_CONFIG = os.path.join(NAV_DIR, 'config', 'plan_only.rviz')
 
 
 def without_depth_camera(params_file):
@@ -48,7 +51,7 @@ def launch_setup(context):
     map_file = LaunchConfiguration('map').perform(context)
     params_file = without_depth_camera(LaunchConfiguration('params_file').perform(context))
     nodes = ['map_server', 'keepout_mask_server', 'costmap_filter_info_server', 'planner_server']
-    return [
+    actions = [
         Node(package='nav2_map_server', executable='map_server', name='map_server',
              output='screen', parameters=[params_file, {'yaml_filename': map_file}]),
         Node(package='nav2_map_server', executable='map_server', name='keepout_mask_server',
@@ -70,11 +73,17 @@ def launch_setup(context):
              arguments=['--x', '0.004', '--z', '0.1664', '--yaw', '3.1416',
                         '--frame-id', 'base_link', '--child-frame-id', 'laser']),
     ]
+    if LaunchConfiguration('use_rviz').perform(context) == 'true':
+        actions.append(Node(package='rviz2', executable='rviz2', name='rviz2', output='log',
+                            arguments=['-d', RVIZ_CONFIG]))
+    return actions
 
 
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('map', default_value=WVH_MAP, description='Map yaml file'),
         DeclareLaunchArgument('params_file', default_value=PARAMS, description='Nav2 params'),
+        DeclareLaunchArgument('use_rviz', default_value='false', choices=['true', 'false'],
+                              description='Open RViz for plan_path.py --interactive'),
         OpaqueFunction(function=launch_setup),
     ])

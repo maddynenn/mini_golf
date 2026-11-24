@@ -55,7 +55,8 @@ Launch options: `map:=<yaml>`, `params_file:=<yaml>`, `use_rviz:=false`,
 | `maps/` | WVH map + keepout zones, and the simulator's map (copies from the starter repo) |
 | `tests/` | `python3 -m pytest tests` (after sourcing ROS) |
 | `launch/plan_only.launch.py` | Path planning only (map, keepout zones, planner): no robot or simulator |
-| `plan_path.py` | Plan one start -> goal (optionally with fake obstacles) and save a picture |
+| `plan_path.py` | Plan one start -> goal (optionally with fake obstacles) and save a picture; `--interactive` to click them in RViz |
+| `config/plan_only.rviz` | RViz layout for interactive planning |
 | `run_planning_tests.py` | A set of planning cases on the WVH map with PASS/FAIL checks |
 
 ## Changes from the starter repo (parcs_stretch_nav2_WVH)
@@ -92,6 +93,44 @@ Runs the robot's planner (NavFn + global costmap, same `config/nav2_params.yaml`
 WVH map and keepout zones) on its own. Nothing moves and no simulator is needed:
 you give the start pose and the goal pose, and get the planned path back as
 numbers and a picture.
+
+### Interactive (RViz)
+
+```bash
+# Terminal 1
+source ~/ament_ws/install/setup.bash
+ros2 launch ~/mini_golf/navigation/launch/plan_only.launch.py use_rviz:=true
+
+# Terminal 2 (prints the numbers for every plan; Ctrl-C to stop)
+source ~/ament_ws/install/setup.bash
+python3 ~/mini_golf/navigation/plan_path.py --interactive
+```
+
+In RViz (toolbar at the top):
+
+| Tool | Click and drag / click | Sets |
+|---|---|---|
+| **2D Pose Estimate** | where the robot is, drag towards where it faces | the robot's start pose |
+| **2D Goal Pose** | where it should go, drag towards the final heading | the goal pose |
+| **Publish Point** | empty floor / an existing obstacle | adds a fake obstacle (0.2 m radius) / removes it |
+
+After every change the path is planned again (about 2 s, while the costmap
+updates) and drawn in red, with a label above the goal: the path length, `NO PATH`
+(the old path disappears), or a warning if the path goes through the collision
+zone, stops short of the goal, or an obstacle wasn't seen (more than 1.5 m from the
+start). The start is the green disc and arrow, the goal blue; the disc is the robot's
+size. Obstacles are magenta cylinders. Start with obstacles with
+`--interactive --obstacle X Y R`.
+
+RViz colours the planner's costmap: magenta is a wall, obstacle or keepout zone,
+cyan is where the robot's centre would collide, red to blue is the cost of being
+near obstacles (the planner avoids it where it can). Scroll to zoom, middle-drag (or
+shift-drag) to pan.
+
+On machines without a GPU RViz may log a `GLSL link result` error for the map
+displays; it still draws them.
+
+### Command line
 
 ```bash
 # Terminal 1 (leave running; "Timed out waiting for transform" messages until

@@ -45,6 +45,6 @@ ros2 launch ~/mini_golf/navigation/launch/mini_golf_nav.launch.py
 python3 ~/mini_golf/navigation/go_to_goal.py X Y YAW
 
 ### Test path planning without a robot (planner only, pictures in navigation/planning_results/)
-ros2 launch ~/mini_golf/navigation/launch/plan_only.launch.py
-python3 ~/mini_golf/navigation/plan_path.py SX SY SYAW GX GY GYAW [--obstacle X Y R]
+ros2 launch ~/mini_golf/navigation/launch/plan_only.launch.py   # add use_rviz:=true for --interactive
+python3 ~/mini_golf/navigation/plan_path.py SX SY SYAW GX GY GYAW [--obstacle X Y R]   # or --interactive (click in RViz)
 python3 ~/mini_golf/navigation/run_planning_tests.py
