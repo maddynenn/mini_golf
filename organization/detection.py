@@ -6,11 +6,17 @@ Uses the head D435i camera (same topic names in sim and on the real robot):
     depth:      /camera/depth/image_rect_raw   (32FC1 metres in sim, 16UC1 mm real)
     depth info: /camera/depth/camera_info      (intrinsics for deprojection)
 
-find_ball() isolates the *yellow* ball by colour (HSV) + shape, gets its pixel,
+find_ball() isolates the small *white* golf ball (standard 42.67 mm diameter) by
+colour (HSV: low saturation, high brightness) + shape, gets its pixel,
 reads the depth there, deprojects to a 3D point in the camera frame (pushed back
 by one ball radius so it is the ball's centre, not its front surface), and
 transforms it into FLOOR_FRAME -- the same frame get_robot_floor_pose_xya()
 returns -- so moving.py can drive to it.
+
+White is a weak cue on its own (walls, paper, tape, glare are white too), so each
+candidate blob must also (1) have an apparent size that matches a 42.67 mm ball
+at the measured depth, and (2) sit on the floor. Works best on a dark/coloured
+floor or carpet.
 
 The hole is NOT detected: its location is predetermined from the map (CLAUDE.md),
 so find_hole() just returns the HOLE constant.
@@ -46,24 +52,30 @@ ALIGNED_DEPTH_INFO_TOPIC = '/camera/color/camera_info'
 HEAD_TILT = -0.8            # rad, look down (CLAUDE.md)
 HEAD_PAN = 0.0             # rad, look forward (+x)
 
-# --- Yellow-ball thresholds (HSV; OpenCV hue is 0-179, so yellow ~ 20-35) ---
-# Deliberately generous so a shadowed, far-away or partly hidden ball still
-# counts. False positives are filtered out afterwards by depth and height above
-# the floor (see find_ball), not by being strict here.
-YELLOW_LOWER = (18, 60, 60)    # (H, S, V) lower bound (was (20, 80, 80))
-YELLOW_UPPER = (45, 255, 255)  # (H, S, V) upper bound (was (40, 255, 255))
-BALL_RADIUS = 0.04445      # m, 3.5 in diameter ball (depth sees the front face;
-                           # we add this along the camera ray to get the centre)
-MIN_BALL_AREA = 15         # px^2, ignore specks (was 50; a ball ~4 m away is only ~30 px^2)
-MAX_BALL_AREA = 150000     # px^2, ignore huge regions (a 3.5 in ball up close is big)
-MIN_CIRCULARITY = 0.4      # 4*pi*area / perimeter^2 (1.0 = perfect circle; was 0.6).
-                           # Small/partly hidden blobs score low even when round.
-MAX_CANDIDATES = 5         # try this many blobs (biggest first) before giving up
+# --- White-ball thresholds (HSV; OpenCV S and V are 0-255) ---
+# White = low saturation, high brightness; hue is meaningless so it spans 0-179.
+# The shadowed underside of the ball is greyer, so V isn't set too high; the
+# size and floor-height checks in find_ball reject other white things.
+WHITE_LOWER = (0, 0, 160)      # (H, S, V) lower bound -- lower V if the ball looks grey
+WHITE_UPPER = (179, 60, 255)   # (H, S, V) upper bound -- raise S if the ball looks tinted
+BALL_RADIUS = 0.021335     # m, standard golf ball: 1.68 in / 42.67 mm diameter
+                           # (depth sees the front face; we add this along the
+                           # camera ray to get the centre)
+MIN_BALL_AREA = 6          # px^2, ignore specks (a golf ball ~3 m away is only ~10-20 px^2)
+MAX_BALL_AREA = 20000      # px^2, ignore huge regions (walls, paper)
+MIN_CIRCULARITY = 0.5      # 4*pi*area / perimeter^2 (1.0 = perfect circle).
+CIRCULARITY_MIN_AREA = 60  # px^2, below this the contour is too pixelated to judge roundness
+MAX_CANDIDATES = 10        # try this many blobs (biggest first) before giving up
+# Apparent size check: expected radius in pixels is fx * BALL_RADIUS / depth.
+# Measured/expected must be within this range (loose, because the mask can miss
+# the shadowed half or include a bit of glare around the ball).
+SIZE_RATIO_MIN = 0.4
+SIZE_RATIO_MAX = 2.0
 # Ball centre height above the floor must be in this range, or the blob is
-# rejected (a yellow thing on a table/wall, or a bad depth reading). Expected
-# value is BALL_RADIUS (~0.044 m); FLOOR_FRAME's z = 0 is the floor.
-MIN_BALL_HEIGHT = -0.10    # m
-MAX_BALL_HEIGHT = 0.20     # m
+# rejected (something white on a table/wall, or a bad depth reading). Expected
+# value is BALL_RADIUS (~0.021 m); FLOOR_FRAME's z = 0 is the floor.
+MIN_BALL_HEIGHT = -0.08    # m
+MAX_BALL_HEIGHT = 0.12     # m
 DEPTH_PATCH = 5            # NxN patch for a robust (median) depth reading
 
 # --- Predetermined hole location in FLOOR_FRAME (read from the map in RViz) ---
@@ -111,7 +123,7 @@ def setup(node):
 
 
 def find_ball(node):
-    """Return the yellow ball's (x, y) in FLOOR_FRAME, or None if not seen."""
+    """Return the white golf ball's (x, y) in FLOOR_FRAME, or None if not seen."""
     color_msg = node.latest_color
     depth_msg = node.latest_depth
     info = node.depth_info
@@ -122,8 +134,9 @@ def find_ball(node):
     bgr = _bridge.imgmsg_to_cv2(color_msg, desired_encoding='bgr8')
     depth = _bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
 
-    # Colour thresholds are loose, so several blobs may match. Try them biggest
-    # first and keep the first one that has valid depth and sits on the floor.
+    # Lots of things are white, so several blobs may match. Try them biggest
+    # first and keep the first one that has valid depth, is golf-ball sized at
+    # that depth, and sits on the floor.
     sx = depth.shape[1] / bgr.shape[1]
     sy = depth.shape[0] / bgr.shape[0]
     for u, v, radius_px in _find_ball_blobs(node, bgr):
@@ -135,6 +148,15 @@ def find_ball(node):
         z = _depth_at(depth, du, dv, r)
         if z is None:
             node.get_logger().info(f'find_ball: blob at ({u}, {v}) has no valid depth, skipping')
+            continue
+
+        # A golf ball at depth z should look about fx * R / z pixels in radius.
+        expected_px = info.k[0] * BALL_RADIUS / z
+        ratio = (radius_px * sx) / expected_px if expected_px > 0 else 0.0
+        if not SIZE_RATIO_MIN <= ratio <= SIZE_RATIO_MAX:
+            node.get_logger().info(
+                f'find_ball: blob at ({u}, {v}) is {ratio:.1f}x golf-ball size at '
+                f'{z:.2f} m, skipping')
             continue
 
         point_cam = _deproject(info, du, dv, z)
@@ -180,11 +202,8 @@ def _wait_for_frames(node, timeout):
 
 
 def _find_ball_blobs(node, bgr):
-    """Sufficiently-circular yellow blobs -> [(u, v, radius_px), ...], biggest first."""
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, YELLOW_LOWER, YELLOW_UPPER)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    """Roughly circular white blobs -> [(u, v, radius_px), ...], biggest first."""
+    mask = white_mask(bgr)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     blobs = []
@@ -196,7 +215,7 @@ def _find_ball_blobs(node, bgr):
         if perimeter == 0:
             continue
         circularity = 4.0 * np.pi * area / (perimeter * perimeter)
-        if circularity < MIN_CIRCULARITY:
+        if area >= CIRCULARITY_MIN_AREA and circularity < MIN_CIRCULARITY:
             continue
         m = cv2.moments(c)
         if m['m00'] == 0:
@@ -206,11 +225,22 @@ def _find_ball_blobs(node, bgr):
         blobs.append((area, u, v, float(np.sqrt(area / np.pi))))
 
     if not blobs:
-        node.get_logger().warn('find_ball: no yellow circular blob found')
+        node.get_logger().warn('find_ball: no white circular blob found')
         return []
 
     blobs.sort(reverse=True)
     return [(u, v, rad) for _, u, v, rad in blobs[:MAX_CANDIDATES]]
+
+
+def white_mask(bgr):
+    """Binary mask of white-ish pixels (also used by detection_test.py)."""
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, WHITE_LOWER, WHITE_UPPER)
+    # Small kernels: a golf ball can be only a few pixels across, and a big
+    # close would merge it with nearby white clutter.
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    return mask
 
 
 def _depth_at(depth, u, v, r=DEPTH_PATCH // 2):
