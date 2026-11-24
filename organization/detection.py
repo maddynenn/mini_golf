@@ -47,13 +47,23 @@ HEAD_TILT = -0.8            # rad, look down (CLAUDE.md)
 HEAD_PAN = 0.0             # rad, look forward (+x)
 
 # --- Yellow-ball thresholds (HSV; OpenCV hue is 0-179, so yellow ~ 20-35) ---
-YELLOW_LOWER = (20, 80, 80)    # (H, S, V) lower bound
-YELLOW_UPPER = (40, 255, 255)  # (H, S, V) upper bound
+# Deliberately generous so a shadowed, far-away or partly hidden ball still
+# counts. False positives are filtered out afterwards by depth and height above
+# the floor (see find_ball), not by being strict here.
+YELLOW_LOWER = (18, 60, 60)    # (H, S, V) lower bound (was (20, 80, 80))
+YELLOW_UPPER = (45, 255, 255)  # (H, S, V) upper bound (was (40, 255, 255))
 BALL_RADIUS = 0.04445      # m, 3.5 in diameter ball (depth sees the front face;
                            # we add this along the camera ray to get the centre)
-MIN_BALL_AREA = 50         # px^2, ignore specks
+MIN_BALL_AREA = 15         # px^2, ignore specks (was 50; a ball ~4 m away is only ~30 px^2)
 MAX_BALL_AREA = 150000     # px^2, ignore huge regions (a 3.5 in ball up close is big)
-MIN_CIRCULARITY = 0.6      # 4*pi*area / perimeter^2 (1.0 = perfect circle)
+MIN_CIRCULARITY = 0.4      # 4*pi*area / perimeter^2 (1.0 = perfect circle; was 0.6).
+                           # Small/partly hidden blobs score low even when round.
+MAX_CANDIDATES = 5         # try this many blobs (biggest first) before giving up
+# Ball centre height above the floor must be in this range, or the blob is
+# rejected (a yellow thing on a table/wall, or a bad depth reading). Expected
+# value is BALL_RADIUS (~0.044 m); FLOOR_FRAME's z = 0 is the floor.
+MIN_BALL_HEIGHT = -0.10    # m
+MAX_BALL_HEIGHT = 0.20     # m
 DEPTH_PATCH = 5            # NxN patch for a robust (median) depth reading
 
 # --- Predetermined hole location in FLOOR_FRAME (read from the map in RViz) ---
@@ -112,29 +122,38 @@ def find_ball(node):
     bgr = _bridge.imgmsg_to_cv2(color_msg, desired_encoding='bgr8')
     depth = _bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
 
-    uv = _find_ball_blob(node, bgr)
-    if uv is None:
-        return None
-    u, v = uv
+    # Colour thresholds are loose, so several blobs may match. Try them biggest
+    # first and keep the first one that has valid depth and sits on the floor.
+    sx = depth.shape[1] / bgr.shape[1]
+    sy = depth.shape[0] / bgr.shape[0]
+    for u, v, radius_px in _find_ball_blobs(node, bgr):
+        # The blob pixel is in the colour image; sample depth at the matching
+        # pixel (scaled in case depth and colour differ in resolution). Shrink
+        # the patch for small (far) blobs so it doesn't read the floor behind.
+        du, dv = int(round(u * sx)), int(round(v * sy))
+        r = max(1, min(DEPTH_PATCH // 2, int(radius_px * sx / 2)))
+        z = _depth_at(depth, du, dv, r)
+        if z is None:
+            node.get_logger().info(f'find_ball: blob at ({u}, {v}) has no valid depth, skipping')
+            continue
 
-    # The blob pixel is in the colour image; sample depth at the matching pixel
-    # (scale in case depth and colour differ in resolution).
-    du = int(round(u * depth.shape[1] / bgr.shape[1]))
-    dv = int(round(v * depth.shape[0] / bgr.shape[0]))
-    z = _depth_at(depth, du, dv)
-    if z is None:
-        node.get_logger().warn('find_ball: ball found in image but no valid depth there')
-        return None
+        point_cam = _deproject(info, du, dv, z)
+        point_cam = _surface_to_center(point_cam, BALL_RADIUS)   # front face -> ball centre
+        point_floor = _to_floor_frame(node, point_cam, depth_msg.header.frame_id)
+        if point_floor is None:
+            return None                          # TF is broken; other blobs won't help
 
-    point_cam = _deproject(info, du, dv, z)
-    point_cam = _surface_to_center(point_cam, BALL_RADIUS)   # front face -> ball centre
-    point_floor = _to_floor_frame(node, point_cam, depth_msg.header.frame_id)
-    if point_floor is None:
-        return None
+        height = point_floor[2]
+        if not MIN_BALL_HEIGHT <= height <= MAX_BALL_HEIGHT:
+            node.get_logger().info(
+                f'find_ball: blob at ({u}, {v}) is {height:.2f} m above the floor, not a ball')
+            continue
 
-    node.get_logger().info(
-        f'find_ball: ball at ({point_floor[0]:.2f}, {point_floor[1]:.2f}) in {FLOOR_FRAME}')
-    return (point_floor[0], point_floor[1])
+        node.get_logger().info(
+            f'find_ball: ball at ({point_floor[0]:.2f}, {point_floor[1]:.2f}) in {FLOOR_FRAME}')
+        return (point_floor[0], point_floor[1])
+
+    return None
 
 
 def find_hole(node):
@@ -160,16 +179,15 @@ def _wait_for_frames(node, timeout):
                            'sim: launched with use_cameras:=true?)')
 
 
-def _find_ball_blob(node, bgr):
-    """Biggest sufficiently-circular yellow blob -> (u, v) pixel, or None."""
+def _find_ball_blobs(node, bgr):
+    """Sufficiently-circular yellow blobs -> [(u, v, radius_px), ...], biggest first."""
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, YELLOW_LOWER, YELLOW_UPPER)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    best = None
-    best_area = 0.0
+    blobs = []
     for c in contours:
         area = cv2.contourArea(c)
         if area < MIN_BALL_AREA or area > MAX_BALL_AREA:
@@ -180,26 +198,27 @@ def _find_ball_blob(node, bgr):
         circularity = 4.0 * np.pi * area / (perimeter * perimeter)
         if circularity < MIN_CIRCULARITY:
             continue
-        if area > best_area:
-            best_area, best = area, c
+        m = cv2.moments(c)
+        if m['m00'] == 0:
+            continue
+        u = int(m['m10'] / m['m00'])
+        v = int(m['m01'] / m['m00'])
+        blobs.append((area, u, v, float(np.sqrt(area / np.pi))))
 
-    if best is None:
+    if not blobs:
         node.get_logger().warn('find_ball: no yellow circular blob found')
-        return None
+        return []
 
-    m = cv2.moments(best)
-    u = int(m['m10'] / m['m00'])
-    v = int(m['m01'] / m['m00'])
-    return (u, v)
+    blobs.sort(reverse=True)
+    return [(u, v, rad) for _, u, v, rad in blobs[:MAX_CANDIDATES]]
 
 
-def _depth_at(depth, u, v):
-    """Median depth (metres) over a patch at (u, v); None if no valid reading.
+def _depth_at(depth, u, v, r=DEPTH_PATCH // 2):
+    """Median depth (metres) over a (2r+1)^2 patch at (u, v); None if no valid reading.
 
     Handles both sim (float32 metres) and real robot (uint16 millimetres).
     """
     h, w = depth.shape[:2]
-    r = DEPTH_PATCH // 2
     u0, u1 = max(0, u - r), min(w, u + r + 1)
     v0, v1 = max(0, v - r), min(h, v + r + 1)
     patch = depth[v0:v1, u0:u1].astype(np.float64)

@@ -10,6 +10,7 @@ import hello_helpers.hello_misc as hm
 
 import detection
 import moving
+import scan
 import swing
 
 GOAL_DISTANCE = 1.5   # m, fallback ball position (straight ahead) until detection works
@@ -27,7 +28,7 @@ class MiniGolf(hm.HelloNode):
         self.stow_the_robot()
 
         # 1. Detection
-        ball = detection.find_ball(self)
+        ball = scan.scan_for_ball(self)   # sweeps the head (and base) until it sees the ball
         hole = detection.find_hole(self)
         if ball is None:
             (x0, y0, a0), _ = self.get_robot_floor_pose_xya()
