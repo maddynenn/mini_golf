@@ -1,9 +1,9 @@
 """Nav2 path planning only, on the WVH map: no robot, no simulator, nothing moves.
 
-    ros2 launch ~/mini_golf/navigation/launch/plan_only.launch.py [use_rviz:=true]
+    ros2 launch ~/mini_golf/navigation/tests/plan_only.launch.py [use_rviz:=true]
 
 Then ask for paths with plan_path.py or run_planning_tests.py. With
-use_rviz:=true, RViz opens (config/plan_only.rviz) for
+use_rviz:=true, RViz opens (tests/plan_only.rviz) for
 plan_path.py --interactive: set the start and goal by clicking. Do not run this
 at the same time as mini_golf_nav.launch.py (both publish /map and TF).
 
@@ -25,11 +25,12 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-NAV_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+NAV_DIR = os.path.dirname(TESTS_DIR)
 WVH_MAP = os.path.join(NAV_DIR, 'maps', 'WVH_edit.yaml')
 KEEPOUT_MAP = os.path.join(NAV_DIR, 'maps', 'WVH_keepout.yaml')
 PARAMS = os.path.join(NAV_DIR, 'config', 'nav2_params.yaml')
-RVIZ_CONFIG = os.path.join(NAV_DIR, 'config', 'plan_only.rviz')
+RVIZ_CONFIG = os.path.join(TESTS_DIR, 'plan_only.rviz')
 
 
 def without_depth_camera(params_file):

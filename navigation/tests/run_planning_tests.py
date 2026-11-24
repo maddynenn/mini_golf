@@ -3,9 +3,9 @@
 
 Needs plan_only.launch.py running (no robot or simulator).
 
-    python3 ~/mini_golf/navigation/run_planning_tests.py [CASE_NAME ...]
+    python3 ~/mini_golf/navigation/tests/run_planning_tests.py [CASE_NAME ...]
 
-Saves one picture per case to navigation/planning_results/<name>.png and
+Saves one picture per case to navigation/tests/planning_results/<name>.png and
 prints a PASS/FAIL/INFO table. Poses are map frame (m, m, rad); obstacles are
 (x, y, radius) not on the map, seen by a fake lidar at the start pose.
 

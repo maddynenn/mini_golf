@@ -53,11 +53,13 @@ Launch options: `map:=<yaml>`, `params_file:=<yaml>`, `use_rviz:=false`,
 | `launch/mini_golf_nav.launch.py` | Starts everything. Based on the starter repo's navigation launch files |
 | `config/nav2_params.yaml` | Nav2 params (copy of the starter's `nav2_voxel_params.yaml`, changes below) |
 | `maps/` | WVH map + keepout zones, and the simulator's map (copies from the starter repo) |
-| `tests/` | `python3 -m pytest tests` (after sourcing ROS) |
-| `launch/plan_only.launch.py` | Path planning only (map, keepout zones, planner): no robot or simulator |
-| `plan_path.py` | Plan one start -> goal (optionally with fake obstacles) and save a picture; `--interactive` to click them in RViz |
-| `config/plan_only.rviz` | RViz layout for interactive planning |
-| `run_planning_tests.py` | A set of planning cases on the WVH map with PASS/FAIL checks |
+| `tests/` | Everything for testing (nothing in it is needed on the robot): |
+| `tests/test_*.py` | Unit tests: `cd ~/mini_golf/navigation && python3 -m pytest tests` (after sourcing ROS) |
+| `tests/plan_only.launch.py` | Path planning only (map, keepout zones, planner): no robot or simulator |
+| `tests/plan_only.rviz` | RViz layout for interactive planning |
+| `tests/plan_path.py` | Plan one start -> goal (optionally with fake obstacles) and save a picture; `--interactive` to click them in RViz |
+| `tests/run_planning_tests.py` | A set of planning cases on the WVH map with PASS/FAIL checks |
+| `tests/planning_results/` | Pictures from the planning tools (not in git) |
 
 ## Changes from the starter repo (parcs_stretch_nav2_WVH)
 
@@ -99,11 +101,11 @@ numbers and a picture.
 ```bash
 # Terminal 1
 source ~/ament_ws/install/setup.bash
-ros2 launch ~/mini_golf/navigation/launch/plan_only.launch.py use_rviz:=true
+ros2 launch ~/mini_golf/navigation/tests/plan_only.launch.py use_rviz:=true
 
 # Terminal 2 (prints the numbers for every plan; Ctrl-C to stop)
 source ~/ament_ws/install/setup.bash
-python3 ~/mini_golf/navigation/plan_path.py --interactive
+python3 ~/mini_golf/navigation/tests/plan_path.py --interactive
 ```
 
 In RViz (toolbar at the top):
@@ -136,19 +138,19 @@ displays; it still draws them.
 # Terminal 1 (leave running; "Timed out waiting for transform" messages until
 # the first plan_path.py run are normal)
 source ~/ament_ws/install/setup.bash
-ros2 launch ~/mini_golf/navigation/launch/plan_only.launch.py
+ros2 launch ~/mini_golf/navigation/tests/plan_only.launch.py
 
 # Terminal 2: one plan (map frame: m, m, rad)
 source ~/ament_ws/install/setup.bash
-python3 ~/mini_golf/navigation/plan_path.py 14 20.5 0  18 20.3 0
-#   -> navigation/planning_results/plan.png  (or --png FILE)
+python3 ~/mini_golf/navigation/tests/plan_path.py 14 20.5 0  18 20.3 0
+#   -> navigation/tests/planning_results/plan.png  (or --png FILE)
 
 # Same, with an obstacle that is not on the map (centre x, y, radius; repeatable)
-python3 ~/mini_golf/navigation/plan_path.py 14 20.5 0  18 20.3 0 --obstacle 15.2 20.5 0.2
+python3 ~/mini_golf/navigation/tests/plan_path.py 14 20.5 0  18 20.3 0 --obstacle 15.2 20.5 0.2
 
 # All test cases (or name some: run_planning_tests.py corridor_straight goal_in_wall)
-python3 ~/mini_golf/navigation/run_planning_tests.py
-#   -> navigation/planning_results/<case>.png, PASS/FAIL table; exit code 1 if any FAIL
+python3 ~/mini_golf/navigation/tests/run_planning_tests.py
+#   -> navigation/tests/planning_results/<case>.png, PASS/FAIL table; exit code 1 if any FAIL
 ```
 
 Output of one plan:
@@ -178,7 +180,7 @@ drives and replans; this tests one plan from the start pose.
 pixel, origin -1.03, -4.14). Areas outside the building load as free space, on
 purpose: the robot may plan there, relying on the lidar for anything unmapped.
 
-**Test cases** (`CASES` in `run_planning_tests.py`, add your own there):
+**Test cases** (`CASES` in `tests/run_planning_tests.py`, add your own there):
 
 | Case | Expectation | Result on the WVH map |
 |---|---|---|

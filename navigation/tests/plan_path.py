@@ -3,9 +3,9 @@
 
 Needs plan_only.launch.py running (no robot or simulator).
 
-    python3 ~/mini_golf/navigation/plan_path.py SX SY SYAW GX GY GYAW \
+    python3 ~/mini_golf/navigation/tests/plan_path.py SX SY SYAW GX GY GYAW \
         [--obstacle X Y R]... [--png FILE]
-    python3 ~/mini_golf/navigation/plan_path.py --interactive [--obstacle X Y R]...
+    python3 ~/mini_golf/navigation/tests/plan_path.py --interactive [--obstacle X Y R]...
 
 --interactive (launch with use_rviz:=true): set the start with RViz's
 "2D Pose Estimate", the goal with "2D Goal Pose", and add/remove fake obstacles
@@ -55,8 +55,8 @@ from sensor_msgs.msg import LaserScan
 from tf2_ros import StaticTransformBroadcaster
 from visualization_msgs.msg import Marker, MarkerArray
 
-NAV_DIR = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(NAV_DIR, 'planning_results')
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+RESULTS_DIR = os.path.join(TESTS_DIR, 'planning_results')
 
 LIDAR_X, LIDAR_YAW = 0.004, 3.1416   # base_link -> laser, as in plan_only.launch.py
 OBSTACLE_MAX_RANGE = 1.5             # m, global costmap obstacle_layer.scan.obstacle_max_range

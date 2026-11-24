@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # plan_path.py is in tests/
 plan_path = pytest.importorskip('plan_path')
 from builtin_interfaces.msg import Time  # noqa: E402
 
