@@ -53,6 +53,7 @@ Launch options: `map:=<yaml>`, `params_file:=<yaml>`, `use_rviz:=false`,
 | `launch/mini_golf_nav.launch.py` | Starts everything. Based on the starter repo's navigation launch files |
 | `config/nav2_params.yaml` | Nav2 params (copy of the starter's `nav2_voxel_params.yaml`, changes below) |
 | `maps/` | WVH map + keepout zones, and the simulator's map (copies from the starter repo) |
+| `nav_testing.md` | Short step-by-step commands for testing on the robot |
 | `tests/` | Everything for testing (nothing in it is needed on the robot): |
 | `tests/test_*.py` | Unit tests: `cd ~/mini_golf/navigation && python3 -m pytest tests` (after sourcing ROS) |
 | `tests/plan_only.launch.py` | Path planning only (map, keepout zones, planner): no robot or simulator |
