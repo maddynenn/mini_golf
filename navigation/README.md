@@ -53,7 +53,14 @@ Launch options: `map:=<yaml>`, `params_file:=<yaml>`, `use_rviz:=false`,
 | `launch/mini_golf_nav.launch.py` | Starts everything. Based on the starter repo's navigation launch files |
 | `config/nav2_params.yaml` | Nav2 params (copy of the starter's `nav2_voxel_params.yaml`, changes below) |
 | `maps/` | WVH map + keepout zones, and the simulator's map (copies from the starter repo) |
-| `tests/` | `python3 -m pytest tests` (after sourcing ROS) |
+| `nav_testing.md` | Short step-by-step commands for testing on the robot |
+| `tests/` | Everything for testing (nothing in it is needed on the robot): |
+| `tests/test_*.py` | Unit tests: `cd ~/mini_golf/navigation && python3 -m pytest tests` (after sourcing ROS) |
+| `tests/plan_only.launch.py` | Path planning only (map, keepout zones, planner): no robot or simulator |
+| `tests/plan_only.rviz` | RViz layout for interactive planning |
+| `tests/plan_path.py` | Plan one start -> goal (optionally with fake obstacles) and save a picture; `--interactive` to click them in RViz |
+| `tests/run_planning_tests.py` | A set of planning cases on the WVH map with PASS/FAIL checks |
+| `tests/planning_results/` | Pictures from the planning tools (not in git) |
 
 ## Changes from the starter repo (parcs_stretch_nav2_WVH)
 
@@ -82,6 +89,126 @@ built in `~/ament_ws`; uses the simulator's small map, not WVH):
 ros2 launch ~/mini_golf/navigation/launch/mini_golf_nav.launch.py use_sim:=true
 python3 ~/mini_golf/navigation/go_to_goal.py 0.6 0.6 1.57
 ```
+
+## Testing path planning without a robot
+
+Runs the robot's planner (NavFn + global costmap, same `config/nav2_params.yaml`,
+WVH map and keepout zones) on its own. Nothing moves and no simulator is needed:
+you give the start pose and the goal pose, and get the planned path back as
+numbers and a picture.
+
+### Interactive (RViz)
+
+```bash
+# Terminal 1
+source ~/ament_ws/install/setup.bash
+ros2 launch ~/mini_golf/navigation/tests/plan_only.launch.py use_rviz:=true
+
+# Terminal 2 (prints the numbers for every plan; Ctrl-C to stop)
+source ~/ament_ws/install/setup.bash
+python3 ~/mini_golf/navigation/tests/plan_path.py --interactive
+```
+
+In RViz (toolbar at the top):
+
+| Tool | Click and drag / click | Sets |
+|---|---|---|
+| **2D Pose Estimate** | where the robot is, drag towards where it faces | the robot's start pose |
+| **2D Goal Pose** | where it should go, drag towards the final heading | the goal pose |
+| **Publish Point** | empty floor / an existing obstacle | adds a fake obstacle (0.2 m radius) / removes it |
+
+After every change the path is planned again (about 2 s, while the costmap
+updates) and drawn in red, with a label above the goal: the path length, `NO PATH`
+(the old path disappears), or a warning if the path goes through the collision
+zone, stops short of the goal, or an obstacle wasn't seen (more than 1.5 m from the
+start). The start is the green disc and arrow, the goal blue; the disc is the robot's
+size. Obstacles are magenta cylinders. Start with obstacles with
+`--interactive --obstacle X Y R`.
+
+RViz colours the planner's costmap: magenta is a wall, obstacle or keepout zone,
+cyan is where the robot's centre would collide, red to blue is the cost of being
+near obstacles (the planner avoids it where it can). Scroll to zoom, middle-drag (or
+shift-drag) to pan.
+
+On machines without a GPU RViz may log a `GLSL link result` error for the map
+displays; it still draws them.
+
+### Command line
+
+```bash
+# Terminal 1 (leave running; "Timed out waiting for transform" messages until
+# the first plan_path.py run are normal)
+source ~/ament_ws/install/setup.bash
+ros2 launch ~/mini_golf/navigation/tests/plan_only.launch.py
+
+# Terminal 2: one plan (map frame: m, m, rad)
+source ~/ament_ws/install/setup.bash
+python3 ~/mini_golf/navigation/tests/plan_path.py 14 20.5 0  18 20.3 0
+#   -> navigation/tests/planning_results/plan.png  (or --png FILE)
+
+# Same, with an obstacle that is not on the map (centre x, y, radius; repeatable)
+python3 ~/mini_golf/navigation/tests/plan_path.py 14 20.5 0  18 20.3 0 --obstacle 15.2 20.5 0.2
+
+# All test cases (or name some: run_planning_tests.py corridor_straight goal_in_wall)
+python3 ~/mini_golf/navigation/tests/run_planning_tests.py
+#   -> navigation/tests/planning_results/<case>.png, PASS/FAIL table; exit code 1 if any FAIL
+```
+
+Output of one plan:
+
+```
+start (14.00, 20.50, 0.00)  goal (18.00, 20.30, 0.00)
+obstacle (15.20, 20.50) r=0.20: in costmap
+path found: 4.53 m (straight line 4.00 m, x1.13), 180 poses, planned in 11 ms
+highest cost along path: 0 (ok; 99+ = robot would touch an obstacle)
+path ends 0.00 m from the goal (starts 0.02 m from the start)
+closest the path centre gets to an added obstacle: 0.57 m (robot radius 0.27 m)
+```
+
+The picture shows the costmap the planner used (black: wall, obstacle or keepout
+zone; dark red: the robot's centre there would mean a collision; yellow to orange:
+near obstacles, which the planner avoids if it can), the path in red, the start
+(green) and goal (blue) with the robot's outline and heading, and added obstacles
+as dashed magenta circles.
+
+**Fake obstacles** are reported by a fake lidar scan from the robot at the start
+pose, the way the real lidar would see them: only the side facing the robot is
+marked, and only within 1.5 m of the robot (`obstacle_max_range` in the params). A
+warning is printed for obstacles further away. The real robot sees more as it
+drives and replans; this tests one plan from the start pose.
+
+**Coordinates:** hover over the map in RViz, or open `maps/WVH_edit.pgm` (0.05 m per
+pixel, origin -1.03, -4.14). Areas outside the building load as free space, on
+purpose: the robot may plan there, relying on the lidar for anything unmapped.
+
+**Test cases** (`CASES` in `tests/run_planning_tests.py`, add your own there):
+
+| Case | Expectation | Result on the WVH map |
+|---|---|---|
+| `corridor_straight` | reach | 4.03 m path for 4.00 m straight line |
+| `corner_to_south_corridor` | reach | Turns into the south corridor |
+| `long_to_south_west`, `long_to_north_east` | reach | ~38 m paths, stay centred in corridors |
+| `start_near_wall` | reach | Start 0.35 m from a wall is fine |
+| `start_touching_wall` | report | Plans anyway, with the first part in the collision zone (see below) |
+| `goal_in_keepout` | not_reach | No path |
+| `goal_in_wall` | not_reach | Plans to a point 0.27 m short whose last pose is in the collision zone (see below) |
+| `goal_outside_building` | report | No path: the walls enclose that part of the map |
+| `obstacle_in_corridor` | avoid | Detours around the fake obstacle (4.53 m) |
+| `corridor_blocked` | avoid_or_none | No path past a row of fake obstacles |
+
+Things the cases show about the planner (not changed, worth knowing):
+- If the robot **starts** too close to a wall (centre inside the collision zone),
+  NavFn still plans: the first 2 of 64 poses are in the collision zone. On the robot
+  the controller then has to drive out of it.
+- If the **goal** is on a wall, NavFn's `tolerance: 0.5` makes it plan to the nearest
+  reachable point instead of failing, and that point (the path's last pose) can be in
+  the collision zone. On the robot it would drive towards that point first; this
+  tool doesn't show what Nav2 does after that.
+- A goal outside the building only gets a path if the map's walls have a gap to it.
+
+Don't run `plan_only.launch.py` at the same time as `mini_golf_nav.launch.py`
+(both publish the map and transforms). Each launch writes a small params copy to
+`/tmp/mini_golf_plan_only_*.yaml`.
 
 ## Running on the robot: step by step
 

@@ -43,3 +43,8 @@ ros2 launch ~/mini_golf/navigation/launch/mini_golf_nav.launch.py
 
 ### Set the start pose in RViz ("2D Pose Estimate"), then send a goal (m, m, rad)
 python3 ~/mini_golf/navigation/go_to_goal.py X Y YAW
+
+### Test path planning without a robot (planner only, pictures in navigation/tests/planning_results/)
+ros2 launch ~/mini_golf/navigation/tests/plan_only.launch.py   # add use_rviz:=true for --interactive
+python3 ~/mini_golf/navigation/tests/plan_path.py SX SY SYAW GX GY GYAW [--obstacle X Y R]   # or --interactive (click in RViz)
+python3 ~/mini_golf/navigation/tests/run_planning_tests.py
